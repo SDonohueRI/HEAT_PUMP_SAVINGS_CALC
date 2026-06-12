@@ -53,7 +53,6 @@
     display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:22px;align-items:start}
   @media (max-width:920px){ .wrap{grid-template-columns:1fr} .rail{position:static!important;order:-1} }
 
-  /* ---- input cards ---- */
   .stack{display:flex;flex-direction:column;gap:16px}
   .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
     padding:18px 18px 6px}
@@ -82,7 +81,6 @@
   .pill{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;
     padding:3px 8px;border-radius:20px;background:var(--cool-soft);color:var(--cool)}
 
-  /* ---- results rail ---- */
   .rail{position:sticky;top:22px;display:flex;flex-direction:column;gap:12px}
   .tierbar{display:flex;align-items:center;justify-content:space-between;font-size:11px}
   .tier{display:inline-flex;align-items:center;gap:6px;font-weight:650;font-family:var(--mono);
@@ -108,7 +106,6 @@
   .metric.heat .val{color:var(--heat)}
   .twocol{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
-  /* signature: energy-by-temperature strip */
   .spark{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 13px 9px}
   .spark .lab{font-size:11px;color:var(--ink-2);margin-bottom:8px;display:flex;justify-content:space-between}
   .spark .lab b{font-weight:600;color:var(--ink)}
@@ -143,7 +140,6 @@
 
   .ico{width:15px;height:15px;flex:none}
 
-  /* print report */
   #report{display:none}
   @media print{
     header.app,.rail .actions,.staging{display:none!important}
@@ -167,8 +163,6 @@
 </header>
 
 <div class="wrap">
-
-  <!-- ============== INPUTS ============== -->
   <div class="stack" id="inputs">
 
     <div class="card">
@@ -288,6 +282,17 @@
         <div class="f"><label>COP @ 5°F</label><input id="cop5" class="num" type="number" step="0.1" placeholder="1.4" value="1.4"></div>
       </div>
       <hr class="sep">
+      <div class="subhead" style="display:flex;align-items:center;gap:9px">
+        Cold-climate capacity data <span class="pill">raises accuracy</span></div>
+      <div class="hint" style="margin:-4px 0 11px;font-size:11px;color:var(--ink-3)">
+        From NEEP list or manufacturer sheet. Leave blank to estimate using standard degradation from rated capacity.
+      </div>
+      <div class="grid g3">
+        <div class="f"><label>Cap @ 47°F (tons)</label><input id="cap47t" class="num" type="number" step="0.1" readonly><span class="hint">= rated capacity above</span></div>
+        <div class="f"><label>Cap @ 17°F (tons)</label><input id="cap17t" class="num" type="number" step="0.1" placeholder="1.95"></div>
+        <div class="f"><label>Cap @ 5°F (tons)</label><input id="cap5t" class="num" type="number" step="0.1" placeholder="1.44"></div>
+      </div>
+      <hr class="sep">
       <div class="grid g2">
         <div class="f"><label>Installed cost $ (pre-rebate)</label><input id="cost" class="num" type="number" value="14500"></div>
         <div class="f"><label>Equipment life (yrs)</label><input id="life" class="num" type="number" value="18"></div>
@@ -296,7 +301,6 @@
 
   </div>
 
-  <!-- ============== RESULTS RAIL ============== -->
   <aside class="rail">
     <div class="tierbar">
       <span class="tier detailed" id="tierBadge">✓ Detailed · ±12%</span>
@@ -354,6 +358,7 @@
       <div class="a"><span>Duct leakage</span><b id="asDuct">12%</b></div>
       <div class="a"><span>Age penalty</span><b id="asAge">−4%</b></div>
       <div class="a"><span>COP source</span><b id="asCop">Mfr. data sheet</b></div>
+      <div class="a"><span>Capacity source</span><b id="asCap">Standard degradation</b></div>
       <div class="a"><span>Grid emissions</span><b id="asGrid">0.287 lb/kWh</b></div>
     </div>
 
@@ -381,9 +386,6 @@
 <div id="report"></div>
 
 <script>
-/* =====================================================================
-   CALCULATION ENGINE  (identical logic to engine.js / Excel export)
-   ===================================================================== */
 const BTU_PER_KWH=3412, BTU_PER_THERM=100000, BTU_PER_GAL_OIL=138500,
       KWH_PER_THERM=29.3, CO2_LB_PER_THERM=11.7, CO2_LB_PER_GAL=22.4;
 
@@ -398,10 +400,14 @@ function modeledCopCurve(hspf2){const s=hspf2/3.412,c47=s*1.25;
 function copAt(T,c){const{cop5,cop17,cop47}=c;let v;
   if(T<=5)v=cop5; else if(T<17)v=cop5+(cop17-cop5)*(T-5)/12;
   else if(T<47)v=cop17+(cop47-cop17)*(T-17)/30;
-  else{const sl=(cop47-cop17)/30; v=Math.min(cop47+sl*(T-47),cop47*1.3);}
-  return Math.max(v,1.0);}
-function heatRatio(T,bal,dh){if(T>=bal)return 0;const d=bal-dh;return d<=0?0:Math.max(0,(bal-T)/d);}
-function coolRatio(T,bal,dc){if(T<=bal)return 0;const d=dc-bal;return d<=0?0:Math.max(0,(T-bal)/d);}
+  else{const sl=(cop47-cop17)/30; v=Math.min(cop47+sl*(T-47),cop47*1.3);} return Math.max(v,1.0);}
+function modeledCapCurve(c47){return{cap47:Math.round(c47),cap17:Math.round(c47*0.65),cap5:Math.round(c47*0.48),modeled:true};}
+function capAtT(T,c){const{cap5,cap17,cap47}=c;let v;
+  if(T<=5)v=cap5;else if(T<17)v=cap5+(cap17-cap5)*(T-5)/12;
+  else if(T<47)v=cap17+(cap47-cap17)*(T-17)/30;
+  else{const sl=(cap47-cap17)/30;v=Math.min(cap47+sl*(T-47),cap47*1.1);} return Math.max(v,0);}
+function heatRatio(T,bal,dh){if(T>=bal)return 0;const d=bal-dh;return d<=0?0:Math.max(0,(bal-T)/d);} 
+function coolRatio(T,bal,dc){if(T<=bal)return 0;const d=dc-bal;return d<=0?0:Math.max(0,(T-bal)/d);} 
 
 function calculate(I){
   const st=BIN_TABLES[I.stationId]||BIN_TABLES.KSEA;
@@ -414,8 +420,10 @@ function calculate(I){
   const ageP=Math.min(0.10,Math.max(0,(I.systemAgeYrs-8)*0.01));
   const effAfue=afue*(1-ageP), effOldHspf=I.existingHspf*(1-ageP), effSeer=I.existingSeer*(1-ageP*0.5);
   let curve=(I.cop47&&I.cop17&&I.cop5)?{cop47:I.cop47,cop17:I.cop17,cop5:I.cop5,modeled:false}:modeledCopCurve(I.hpHspf2);
+  const hpCap47=I.hpCapTons*12000;
+  let capCurve=(I.cap17Tons&&I.cap5Tons)?{cap47:hpCap47,cap17:I.cap17Tons*12000,cap5:I.cap5Tons*12000,modeled:false}:modeledCapCurve(hpCap47);
 
-  let bTh=0,bGal=0,bKwh=0,bCool=0,hpH=0,hpBk=0,hpBkTh=0,hpC=0; const rows=[];
+  let bTh=0,bGal=0,bKwh=0,bCool=0,hpH=0,hpBkL=0,hpBkLTh=0,hpBkCap=0,hpBkCapTh=0,hpC=0; const rows=[];
   for(const{t,h}of st.bins){
     const hr=heatRatio(t,I.balPointHeatF,I.designHeatTempF), cr=coolRatio(t,I.balPointCoolF,I.designCoolTempF);
     const hLoad=dHB*hr*duct, cLoad=dCB*cr*duct, hBTU=hLoad*h, cBTU=cLoad*h;
@@ -427,16 +435,26 @@ function calculate(I){
       else{const oc=effOldHspf/3.412;bh=hBTU/(oc*BTU_PER_KWH);bKwh+=bh;}
     }
     if(cBTU>0&&I.existingSeer>0)bCool+=cBTU/(effSeer*1000);
-    let cop=0,hh=0;
+
+    let cop=0, hh=0, cap=0, bkL=0, bkLTh=0, bkCap=0, bkCapTh=0;
     if(hBTU>0){
       if(t<I.hpMinTempF){
-        if(I.backupType==="dualfuel_gas"){hpBkTh+=hBTU/(0.95*BTU_PER_THERM);}
-        else{hh=hBTU/BTU_PER_KWH;hpBk+=hh;}
-      } else {cop=copAt(t,curve);hh=hBTU/(cop*BTU_PER_KWH);hpH+=hh;}
+        if(I.backupType==="dualfuel_gas"){bkLTh=hBTU/(0.95*BTU_PER_THERM);hpBkLTh+=bkLTh;}
+        else if(I.backupType!=="none"){bkL=hBTU/BTU_PER_KWH;hpBkL+=bkL;}
+      } else {
+        cop=copAt(t,curve); cap=capAtT(t,capCurve);
+        const del=Math.min(hLoad,cap), short=Math.max(0,hLoad-cap), delBTU=del*h, shortBTU=short*h;
+        hh=delBTU/(cop*BTU_PER_KWH); hpH+=hh;
+        if(shortBTU>0){
+          if(I.backupType==="dualfuel_gas"){bkCapTh=shortBTU/(0.95*BTU_PER_THERM);hpBkCapTh+=bkCapTh;}
+          else if(I.backupType!=="none"){bkCap=shortBTU/BTU_PER_KWH;hpBkCap+=bkCap;}
+        }
+      }
     }
     let cc=0; if(cBTU>0){const dr=t>85?0.92:1; cc=cBTU/(I.hpSeer2*dr*1000); hpC+=cc;}
-    rows.push({t,h,hr:r3(hr),cop:r2(cop),hLoad:Math.round(hLoad),hHrs:Math.round(hLoad*h/1000)});
+    rows.push({t,h,hr:r3(hr),cop:r2(cop),hLoad:Math.round(hLoad),capAtTemp:Math.round(cap),hHrs:Math.round(hLoad*h/1000),hpHeatKwh:r1(hh),hpBackupLockoutKwh:r1(bkL),hpBackupCapKwh:r1(bkCap),hpBackupLockoutTherms:r1(bkLTh),hpBackupCapTherms:r1(bkCapTh)});
   }
+  const hpBk=hpBkL+hpBkCap, hpBkTh=hpBkLTh+hpBkCapTh;
   const baseHeatCost=bTh*I.gasRateDollars+bGal*I.oilRateDollars+bKwh*elec;
   const baseCost=baseHeatCost+bCool*elec;
   const hpElec=hpH+hpBk+hpC, hpCost=hpElec*elec+hpBkTh*I.gasRateDollars;
@@ -445,30 +463,25 @@ function calculate(I){
   const hpEq=hpElec+hpBkTh*KWH_PER_THERM, redKwh=baseEq-hpEq;
   const baseCo2=bTh*CO2_LB_PER_THERM+bGal*CO2_LB_PER_GAL+(bKwh+bCool)*I.gridEmissionsLbPerKwh;
   const hpCo2=hpElec*I.gridEmissionsLbPerKwh+hpBkTh*CO2_LB_PER_THERM, redCo2=baseCo2-hpCo2;
-  let tier,band; if(I.hasManualJ&&!curve.modeled){tier="Detailed";band=12;}
-  else if(I.hasManualJ){tier="Standard";band=18;} else{tier="Indicative";band=25;}
+  let tier,band; if(I.hasManualJ&&!curve.modeled){tier="Detailed";band=12;} else if(I.hasManualJ){tier="Standard";band=18;} else{tier="Indicative";band=25;}
   const pay=save>0?I.installedCost/save:Infinity, e=I.rateEscalationPct/100, d=I.discountRatePct/100;
   let life=0,npv=-I.installedCost;
-  for(let y=1;y<=I.equipmentLifeYrs;y++){const s=save*Math.pow(1+e,y-1);life+=s;npv+=s/Math.pow(1+d,y);}
+  for(let y=1;y<=I.equipmentLifeYrs;y++){const s=save*Math.pow(1+e,y-1);life+=s;npv+=s/Math.pow(1+d,y);} 
   const bnd=v=>({low:v*(1-band/100),high:v*(1+band/100)});
   return{tier,bandPct:band,pctSavings:pct,annualSavings:save,annualSavingsBand:bnd(save),
     energyReductionKwh:redKwh,energyReductionBand:bnd(redKwh),co2ReductionTons:redCo2/2000,
     baseCost,hpCost,simplePayback:pay,lifetimeSavings:life,npv,
     assumptions:{balPointHeatF:I.balPointHeatF,ductLeakUsed:leak,agePenaltyPct:r1(ageP*100),
-      copSource:curve.modeled?"Modeled from HSPF2":"Mfr. data sheet",curve,
+      copSource:curve.modeled?"Modeled from HSPF2":"Mfr. data sheet",capSource:capCurve.modeled?"Standard degradation":"Mfr. data sheet",curve,capCurve,
       gridEmissionsLbPerKwh:I.gridEmissionsLbPerKwh,station:st.label},
-    rows, raw:{bTh,bGal,bKwh,bCool,hpH,hpBk,hpBkTh,hpC,hpElec,duct,effAfue,effSeer,curve}};
+    rows, raw:{bTh,bGal,bKwh,bCool,hpH,hpBk,hpBkTh,hpC,hpElec,hpBkL,hpBkLTh,hpBkCap,hpBkCapTh,duct,effAfue,effSeer,curve,capCurve}};
 }
 function r1(v){return Math.round(v*10)/10;} function r2(v){return Math.round(v*100)/100;} function r3(v){return Math.round(v*1000)/1000;}
 
-/* =====================================================================
-   UI BINDING
-   ===================================================================== */
 const $=id=>document.getElementById(id);
 const num=id=>parseFloat($(id).value)||0;
 const FUEL_LABEL={gas:"gas furnace",electric:"electric resistance heat",oil:"oil / propane furnace",heatpump:"existing heat pump"};
 const money=v=>"$"+Math.round(v).toLocaleString();
-const moneyk=v=>"$"+Math.round(v).toLocaleString();
 
 function gather(){
   const fuel=$("fuel").value, seer=num("oldSeer");
@@ -484,6 +497,7 @@ function gather(){
     hasManualJ:$("hasMJ").value==="yes",
     ductSystem:$("duct").value, ductLeakagePct:num("leak"),
     hpHspf2:num("hspf2"), hpSeer2:num("seer2"), hpMinTempF:num("minT"),
+    hpCapTons:num("hpCap"), cap17Tons:num("cap17t")||null, cap5Tons:num("cap5t")||null,
     cop47:num("cop47")||null, cop17:num("cop17")||null, cop5:num("cop5")||null,
     backupType:$("backup").value,
     installedCost:num("cost"), equipmentLifeYrs:num("life"),
@@ -519,6 +533,7 @@ function recalc(){
   $("asDuct").textContent=R.assumptions.ductLeakUsed+"%";
   $("asAge").textContent="−"+R.assumptions.agePenaltyPct+"%";
   $("asCop").textContent=R.assumptions.copSource;
+  $("asCap").textContent=R.assumptions.capSource;
   $("asGrid").textContent=R.assumptions.gridEmissionsLbPerKwh+" lb/kWh";
 
   drawSpark(R.rows);
@@ -540,22 +555,19 @@ function drawSpark(rows){
   $("sparkSvg").innerHTML=s;
 }
 
-/* react to any input */
 document.getElementById("inputs").addEventListener("input",()=>{toggleConditional();recalc();});
 function toggleConditional(){
   const fuel=$("fuel").value;
   $("wrapAfue").style.display=(fuel==="gas"||fuel==="oil")?"":"none";
   $("wrapOldHspf").style.display=(fuel==="heatpump")?"":"none";
   $("wrapLeak").style.display=$("duct").value==="ducted_tested"?"":"none";
+  $("cap47t").value=$("hpCap").value;
 }
 
-/* =====================================================================
-   SAVE / LOAD JSON  (local only)
-   ===================================================================== */
 const FIELD_IDS=["custName","zip","estDate","climZone","station","grid","dhT","dcT","balH",
 "eRate","gRate","oRate","esc","disc","fuel","sysType","afue","oldHspf","oldSeer","age",
 "loadH","loadC","area","duct","leak","hasMJ","hpType","hpCap","minT","hspf2","seer2",
-"backup","cop47","cop17","cop5","cost","life"];
+"backup","cop47","cop17","cop5","cap17t","cap5t","cost","life"];
 function saveJSON(){
   const data={_tool:"hp-savings-estimator",_version:1,saved:new Date().toISOString(),fields:{}};
   FIELD_IDS.forEach(id=>data.fields[id]=$(id).value);
@@ -576,16 +588,13 @@ function loadJSON(ev){
   rd.readAsText(f); ev.target.value="";
 }
 
-/* =====================================================================
-   EXCEL EXPORT — live formulas mirroring the engine
-   ===================================================================== */
 function exportExcel(){
   if(typeof XLSX==="undefined"){
     alert("Excel export library didn't load — check your internet connection and reload the page. (The rest of the calculator works offline.)");
     return;
   }
   if(!LAST){ alert("Enter job details and recalculate first."); return; }
-  const {I,R}=LAST, raw=R.raw, c=raw.curve;
+  const {I,R}=LAST, raw=R.raw, c=raw.curve, capCurve=raw.capCurve;
   const elec=I.elecRateCents/100;
   const fuelDiv = I.existingFuel==="gas"?`(Inputs!$B$8*100000)`
     : I.existingFuel==="oil"?`(Inputs!$B$8*138500)`
@@ -595,157 +604,108 @@ function exportExcel(){
     : I.existingFuel==="oil"?`Inputs!$B$12` : `Inputs!$B$10`;
   const baseHeatRateV = I.existingFuel==="gas"?I.gasRateDollars
     : I.existingFuel==="oil"?I.oilRateDollars : elec;
-  /* per-bin cached values, computed with the same math the formulas express */
   const baseDivV = I.existingFuel==="gas"?raw.effAfue*100000
     : I.existingFuel==="oil"?raw.effAfue*138500
     : I.existingFuel==="electric"?3412 : (I.existingHspf/3.412)*3412;
-  const cv=[]; let tG=0,tH=0,tK=0,tL=0;
+  const cv=[]; let tH=0,tI=0,tJ=0,tK=0,tN=0,tO=0;
   for(const b of BIN_TABLES.KSEA.bins){
     const hr=Math.max(0,(I.balPointHeatF-b.t)/(I.balPointHeatF-I.designHeatTempF));
     const D=I.designHeatLoadMBH*1000*Math.max(0,hr)*raw.duct, E=D*b.h;
-    let F; if(b.t<I.hpMinTempF)F=1; else F=copAt(b.t,c);
-    const G=b.t<I.hpMinTempF?E/3412:E/(F*3412);
-    const H=E/baseDivV;
-    const ci=Math.max(0,(b.t-I.balPointCoolF)/(I.designCoolTempF-I.balPointCoolF));
-    const J=I.designCoolLoadTons*12000*ci*raw.duct*b.h;
-    const K=raw.effSeer>0?J/(raw.effSeer*1000):0;
-    const L=J/(I.hpSeer2*1000);
-    cv.push({hr:Math.max(0,hr),D,E,F,G,H,ci,J,K,L});
-    tG+=G;tH+=H;tK+=K;tL+=L;
+    let Fv=b.t<I.hpMinTempF?0:copAt(b.t,c);
+    let Gv=b.t<I.hpMinTempF?0:capAtT(b.t,capCurve);
+    const Hv=b.t<I.hpMinTempF?0:(Math.min(D,Gv)*b.h)/(Fv*3412);
+    const Iv=b.t<I.hpMinTempF?E/3412:0;
+    const Jv=b.t>=I.hpMinTempF?Math.max(0,D-Gv)*b.h/3412:0;
+    const Kv=E/baseDivV;
+    const Lv=Math.max(0,(b.t-I.balPointCoolF)/(I.designCoolTempF-I.balPointCoolF));
+    const Mv=I.designCoolLoadTons*12000*Lv*raw.duct*b.h;
+    const Nv=raw.effSeer>0?Mv/(raw.effSeer*1000):0;
+    const Ov=Mv/(I.hpSeer2*1000);
+    cv.push({hr,D,E,Fv,Gv,Hv,Iv,Jv,Kv,Lv,Mv,Nv,Ov});
+    tH+=Hv;tI+=Iv;tJ+=Jv;tK+=Kv;tN+=Nv;tO+=Ov;
   }
 
-  /* ---- Inputs sheet (fixed addresses referenced by formulas) ---- */
   const inp=[
     ["Parameter","Value","Unit"],
-    ["Design heating load",I.designHeatLoadMBH,"MBH"],          //B2
-    ["Design cooling load",I.designCoolLoadTons,"tons"],        //B3
-    ["Heating design temp",I.designHeatTempF,"°F"],             //B4
-    ["Heating balance point",I.balPointHeatF,"°F"],             //B5
-    ["Cooling balance point",I.balPointCoolF,"°F"],             //B6
-    ["Cooling design temp",I.designCoolTempF,"°F"],             //B7
-    ["Furnace AFUE (age-adj.)",r3(raw.effAfue),"fraction"],     //B8
-    ["Duct factor",r3(raw.duct),"×"],                           //B9
-    ["Electric rate",r3(I.elecRateCents/100),"$/kWh"],          //B10
-    ["Gas rate",I.gasRateDollars,"$/therm"],                    //B11
-    ["Oil rate",I.oilRateDollars,"$/gal"],                      //B12
-    ["HP COP @47°F",c.cop47,""],                                //B13
-    ["HP COP @17°F",c.cop17,""],                                //B14
-    ["HP COP @5°F",c.cop5,""],                                  //B15
-    ["HP SEER2",I.hpSeer2,""],                                  //B16
-    ["Existing AC SEER (age-adj.)",r2(raw.effSeer),""],         //B17
-    ["HP min operating temp",I.hpMinTempF,"°F"],                //B18
-    ["Existing HP heat COP",r2(I.existingHspf/3.412),""],       //B19
-    ["Installed cost",I.installedCost,"$"],                     //B20
-    ["Rate escalation",I.rateEscalationPct/100,"/yr"],          //B21
-    ["Discount rate",I.discountRatePct/100,"/yr"],              //B22
-    ["Equipment life",I.equipmentLifeYrs,"yrs"],                //B23
-    ["Grid emissions",I.gridEmissionsLbPerKwh,"lb/kWh"]         //B24
+    ["Design heating load",I.designHeatLoadMBH,"MBH"],
+    ["Design cooling load",I.designCoolLoadTons,"tons"],
+    ["Heating design temp",I.designHeatTempF,"°F"],
+    ["Heating balance point",I.balPointHeatF,"°F"],
+    ["Cooling balance point",I.balPointCoolF,"°F"],
+    ["Cooling design temp",I.designCoolTempF,"°F"],
+    ["Furnace AFUE (age-adj.)",r3(raw.effAfue),"fraction"],
+    ["Duct factor",r3(raw.duct),"×"],
+    ["Electric rate",r3(I.elecRateCents/100),"$/kWh"],
+    ["Gas rate",I.gasRateDollars,"$/therm"],
+    ["Oil rate",I.oilRateDollars,"$/gal"],
+    ["HP COP @47°F",c.cop47,""],
+    ["HP COP @17°F",c.cop17,""],
+    ["HP COP @5°F",c.cop5,""],
+    ["HP SEER2",I.hpSeer2,""],
+    ["Existing AC SEER (age-adj.)",r2(raw.effSeer),""],
+    ["HP min operating temp",I.hpMinTempF,"°F"],
+    ["Existing HP heat COP",r2(I.existingHspf/3.412),""],
+    ["Installed cost",I.installedCost,"$"],
+    ["Rate escalation",I.rateEscalationPct/100,"/yr"],
+    ["Discount rate",I.discountRatePct/100,"/yr"],
+    ["Equipment life",I.equipmentLifeYrs,"yrs"],
+    ["Grid emissions",I.gridEmissionsLbPerKwh,"lb/kWh"],
+    ["HP cap @47°F (BTU/hr)",capCurve.cap47,"BTU/hr"],
+    ["HP cap @17°F (BTU/hr)",capCurve.cap17,"BTU/hr"],
+    ["HP cap @5°F (BTU/hr)",capCurve.cap5,"BTU/hr"]
   ];
   const wsI=XLSX.utils.aoa_to_sheet(inp); wsI["!cols"]=[{wch:28},{wch:12},{wch:10}];
 
-  /* ---- Bin calc sheet with live formulas + cached values ---- */
-  const head=["Bin °F","Hours","Heat load ratio","Heat load BTU/hr","Heat BTU/yr",
-    "COP","HP heat kWh","Baseline heat ("+fuelUnit+")","Cool load ratio","Cool BTU/yr",
-    "Baseline cool kWh","HP cool kWh"];
+  const head=["Bin °F","Hours","Heat load ratio","Heat load BTU/hr","Heat BTU/yr","COP","HP cap BTU/hr","HP compressor kWh","Backup lockout kWh","Backup capacity kWh","Baseline heat ("+fuelUnit+")","Cool load ratio","Cool BTU/yr","Baseline cool kWh","HP cool kWh"];
   const bins=BIN_TABLES.KSEA.bins; const N=bins.length;
-  const aoa=[head];
-  bins.forEach(b=>aoa.push([b.t,b.h,null,null,null,null,null,null,null,null,null,null]));
-  aoa.push(["TOTAL",null,null,null,null,null,null,null,null,null,null,null]); // total row in range
+  const aoa=[head]; bins.forEach(b=>aoa.push([b.t,b.h,null,null,null,null,null,null,null,null,null,null,null,null,null]));
+  aoa.push(["TOTAL",null,null,null,null,null,null,null,null,null,null,null,null,null,null]);
   const ws=XLSX.utils.aoa_to_sheet(aoa);
   for(let i=0;i<N;i++){
     const r=i+2; const A=`A${r}`,B=`B${r}`; const v=cv[i];
     setF(ws,`C${r}`,`MAX(0,(Inputs!$B$5-${A})/(Inputs!$B$5-Inputs!$B$4))`,v.hr);
     setF(ws,`D${r}`,`Inputs!$B$2*1000*C${r}*Inputs!$B$9`,v.D);
     setF(ws,`E${r}`,`D${r}*${B}`,v.E);
-    setF(ws,`F${r}`,`IF(${A}<Inputs!$B$18,1,MAX(1,IF(${A}<=5,Inputs!$B$15,IF(${A}<17,Inputs!$B$15+(Inputs!$B$14-Inputs!$B$15)*(${A}-5)/12,IF(${A}<47,Inputs!$B$14+(Inputs!$B$13-Inputs!$B$14)*(${A}-17)/30,Inputs!$B$13)))))`,v.F);
-    setF(ws,`G${r}`,`IF(${A}<Inputs!$B$18,E${r}/3412,E${r}/(F${r}*3412))`,v.G);
-    setF(ws,`H${r}`,`E${r}/${fuelDiv}`,v.H);
-    setF(ws,`I${r}`,`MAX(0,(${A}-Inputs!$B$6)/(Inputs!$B$7-Inputs!$B$6))`,v.ci);
-    setF(ws,`J${r}`,`Inputs!$B$3*12000*I${r}*Inputs!$B$9*${B}`,v.J);
-    setF(ws,`K${r}`,`IF(Inputs!$B$17>0,J${r}/(Inputs!$B$17*1000),0)`,v.K);
-    setF(ws,`L${r}`,`J${r}/(Inputs!$B$16*1000)`,v.L);
+    setF(ws,`F${r}`,`IF(${A}<Inputs!$B$18,0,MAX(1,IF(${A}<=5,Inputs!$B$15,IF(${A}<17,Inputs!$B$15+(Inputs!$B$14-Inputs!$B$15)*(${A}-5)/12,IF(${A}<47,Inputs!$B$14+(Inputs!$B$13-Inputs!$B$14)*(${A}-17)/30,MIN(Inputs!$B$13+((Inputs!$B$13-Inputs!$B$14)/30)*(${A}-47),Inputs!$B$13*1.3))))))`,v.Fv);
+    setF(ws,`G${r}`,`IF(${A}<Inputs!$B$18,0,IF(${A}<=5,Inputs!$B$27,IF(${A}<17,Inputs!$B$27+(Inputs!$B$26-Inputs!$B$27)*(${A}-5)/12,IF(${A}<47,Inputs!$B$26+(Inputs!$B$25-Inputs!$B$26)*(${A}-17)/30,MIN(Inputs!$B$25+((Inputs!$B$25-Inputs!$B$26)/30)*(${A}-47),Inputs!$B$25*1.1)))))`,v.Gv);
+    setF(ws,`H${r}`,`IF(${A}<Inputs!$B$18,0,MIN(D${r},G${r})*${B}/(F${r}*3412))`,v.Hv);
+    setF(ws,`I${r}`,`IF(${A}<Inputs!$B$18,E${r}/3412,0)`,v.Iv);
+    setF(ws,`J${r}`,`IF(${A}>=Inputs!$B$18,MAX(0,D${r}-G${r})*${B}/3412,0)`,v.Jv);
+    setF(ws,`K${r}`,`E${r}/${fuelDiv}`,v.Kv);
+    setF(ws,`L${r}`,`MAX(0,(${A}-Inputs!$B$6)/(Inputs!$B$7-Inputs!$B$6))`,v.Lv);
+    setF(ws,`M${r}`,`Inputs!$B$3*12000*L${r}*Inputs!$B$9*${B}`,v.Mv);
+    setF(ws,`N${r}`,`IF(Inputs!$B$17>0,M${r}/(Inputs!$B$17*1000),0)`,v.Nv);
+    setF(ws,`O${r}`,`M${r}/(Inputs!$B$16*1000)`,v.Ov);
   }
   const tot=N+2;
-  setF(ws,`G${tot}`,`SUM(G2:G${N+1})`,tG);
   setF(ws,`H${tot}`,`SUM(H2:H${N+1})`,tH);
+  setF(ws,`I${tot}`,`SUM(I2:I${N+1})`,tI);
+  setF(ws,`J${tot}`,`SUM(J2:J${N+1})`,tJ);
   setF(ws,`K${tot}`,`SUM(K2:K${N+1})`,tK);
-  setF(ws,`L${tot}`,`SUM(L2:L${N+1})`,tL);
+  setF(ws,`N${tot}`,`SUM(N2:N${N+1})`,tN);
+  setF(ws,`O${tot}`,`SUM(O2:O${N+1})`,tO);
   ws["!cols"]=head.map(()=>({wch:14}));
 
-  /* ---- Summary sheet (formulas + cached values) ---- */
-  const baseHeatNative = I.existingFuel==="gas"?raw.bTh:I.existingFuel==="oil"?raw.bGal:raw.bKwh;
-  const sB8=baseHeatNative*baseHeatRateV, sB9=raw.bCool*elec, sB10=sB8+sB9;
-  const sB11=raw.hpH+raw.hpBk+raw.hpC, sB12=sB11*elec;
-  const sB14=sB10-sB12, sB15=sB10>0?sB14/sB10:0, sB16=sB14>0?I.installedCost/sB14:0;
+  const sB8=tK*baseHeatRateV, sB9=tN*elec, sB10=sB8+sB9, sB13=tH+tI+tJ+tO, sB14=sB13*elec, sB16=sB10-sB14, sB17=sB10>0?sB16/sB10:0, sB18=sB16>0?I.installedCost/sB16:0;
   const sAoa=[
-    ["Heat pump energy savings — summary",""],
-    ["",""],
-    ["Baseline heat ("+fuelUnit+")",null],          //B3
-    ["Baseline cool (kWh)",null],                    //B4
-    ["HP heat+backup (kWh)",null],                   //B5
-    ["HP cool (kWh)",null],                          //B6
-    ["",""],
-    ["Baseline heating cost ($)",null],              //B8
-    ["Baseline cooling cost ($)",null],              //B9
-    ["Baseline total cost ($)",null],                //B10
-    ["HP electric total (kWh)",null],                //B11
-    ["HP total cost ($)",null],                      //B12
-    ["",""],
-    ["Annual savings ($)",null],                     //B14
-    ["% energy cost reduction",null],                //B15
-    ["Simple payback (yrs)",null]                    //B16
+    ["Heat pump energy savings — summary",""],["",""],
+    ["Baseline heat ("+fuelUnit+")",null],["Baseline cool (kWh)",null],["HP compressor heat (kWh)",null],["HP backup – lockout (kWh)",null],["HP backup – capacity (kWh)",null],["HP cool (kWh)",null],["",""],["Baseline heating cost ($)",null],["Baseline cooling cost ($)",null],["Baseline total cost ($)",null],["HP electric total (kWh)",null],["HP total cost ($)",null],["",""],["Annual savings ($)",null],["% energy cost reduction",null],["Simple payback (yrs)",null]
   ];
   const wsS=XLSX.utils.aoa_to_sheet(sAoa); wsS["!cols"]=[{wch:30},{wch:14}];
   const cc=`'Bin calc'`;
-  setF(wsS,"B3",`${cc}!H${tot}`,tH);
-  setF(wsS,"B4",`${cc}!K${tot}`,tK);
-  setF(wsS,"B5",`${cc}!G${tot}`,tG);
-  setF(wsS,"B6",`${cc}!L${tot}`,tL);
-  setF(wsS,"B8",`B3*${baseHeatRate}`,sB8);
-  setF(wsS,"B9",`B4*Inputs!$B$10`,sB9);
-  setF(wsS,"B10",`B8+B9`,sB10);
-  setF(wsS,"B11",`B5+B6`,sB11);
-  setF(wsS,"B12",`B11*Inputs!$B$10`,sB12);
-  setF(wsS,"B14",`B10-B12`,sB14);
-  setF(wsS,"B15",`B14/B10`,sB15); wsS["B15"].z="0.0%";
-  setF(wsS,"B16",`Inputs!$B$20/B14`,sB16);
+  setF(wsS,"B3",`${cc}!K${tot}`,tK); setF(wsS,"B4",`${cc}!N${tot}`,tN); setF(wsS,"B5",`${cc}!H${tot}`,tH); setF(wsS,"B6",`${cc}!I${tot}`,tI); setF(wsS,"B7",`${cc}!J${tot}`,tJ); setF(wsS,"B8",`${cc}!O${tot}`,tO);
+  setF(wsS,"B10",`B3*${baseHeatRate}`,sB8); setF(wsS,"B11",`B4*Inputs!$B$10`,sB9); setF(wsS,"B12",`B10+B11`,sB10); setF(wsS,"B13",`B5+B6+B7+B8`,sB13); setF(wsS,"B14",`B13*Inputs!$B$10`,sB14); setF(wsS,"B16",`B12-B14`,sB16); setF(wsS,"B17",`B16/B12`,sB17); wsS["B17"].z="0.0%"; setF(wsS,"B18",`Inputs!$B$20/B16`,sB18);
 
-  /* ---- Notes ---- */
   const notes=XLSX.utils.aoa_to_sheet([
-    ["Heat Pump Energy Savings — calculation workbook"],
-    [""],
-    ["This workbook reproduces the web tool's bin-hour engine with LIVE formulas."],
-    ["Change any value on the Inputs sheet and the Bin calc + Summary sheets recompute."],
-    [""],
-    ["Scope notes for this sample build:"],
-    ["• Bin hours are representative TMY3 values for "+R.assumptions.station+"."],
-    ["• Below the HP minimum operating temp, load is modeled as electric-resistance backup."],
-    ["  (Dual-fuel gas backup is handled precisely in the web tool.)"],
-    ["• Baseline heating formula is written for the selected fuel: "+I.existingFuel+"."],
-    ["• Confidence band (±"+R.bandPct+"%) and CO₂ are reported in the web tool."],
-    [""],
-    ["Generated "+new Date().toLocaleString()+" — STAGING BUILD, verify before customer use."]
-  ]);
-  notes["!cols"]=[{wch:78}];
+    ["Heat Pump Energy Savings — calculation workbook"],[""],["This workbook reproduces the web tool's bin-hour engine with LIVE formulas."],["Change any value on the Inputs sheet and the Bin calc + Summary sheets recompute."],[""],["Scope notes for this sample build:"],["• Bin hours are representative TMY3 values for "+R.assumptions.station+"."],["• Capacity-limited HP output is modeled above compressor lockout."],["• Backup heat is separated into lockout backup and capacity-shortfall backup."],["• Baseline heating formula is written for the selected fuel: "+I.existingFuel+"."],["• Confidence band (±"+R.bandPct+"%) and CO₂ are reported in the web tool."],[""],["Generated "+new Date().toLocaleString()+" — STAGING BUILD, verify before customer use."]
+  ]); notes["!cols"]=[{wch:78}];
 
-  const wb=XLSX.utils.book_new();
-  wb.Workbook={CalcPr:{fullCalcOnLoad:true}}; // force Excel to recompute on open
-  XLSX.utils.book_append_sheet(wb,wsS,"Summary");
-  XLSX.utils.book_append_sheet(wb,wsI,"Inputs");
-  XLSX.utils.book_append_sheet(wb,ws,"Bin calc");
-  XLSX.utils.book_append_sheet(wb,notes,"Read me");
-  const nm=($("custName").value||"estimate").replace(/[^a-z0-9]+/gi,"_").toLowerCase();
-  XLSX.writeFile(wb,nm+"_hp_savings.xlsx");
+  const wb=XLSX.utils.book_new(); wb.Workbook={CalcPr:{fullCalcOnLoad:true}};
+  XLSX.utils.book_append_sheet(wb,wsS,"Summary"); XLSX.utils.book_append_sheet(wb,wsI,"Inputs"); XLSX.utils.book_append_sheet(wb,ws,"Bin calc"); XLSX.utils.book_append_sheet(wb,notes,"Read me");
+  const nm=($("custName").value||"estimate").replace(/[^a-z0-9]+/gi,"_").toLowerCase(); XLSX.writeFile(wb,nm+"_hp_savings.xlsx");
 }
 function setF(ws,addr,formula,cached){ ws[addr]={t:"n",f:formula,v:cached}; }
-function set(ws,addr,formula,text){
-  if(text!==undefined){ws[addr]={t:"s",v:text};return;}
-  ws[addr]={t:"n",f:formula};
-}
 
-/* =====================================================================
-   PRINT REPORT
-   ===================================================================== */
 function buildReport(){
   if(!LAST)return; const {I,R}=LAST;
   const row=(l,v)=>`<tr><td style="padding:3px 18px 3px 0;color:#444">${l}</td><td style="padding:3px 0;font-family:monospace;text-align:right">${v}</td></tr>`;
@@ -777,16 +737,13 @@ function buildReport(){
     </table>
     <div style="margin-top:16px;font-size:11px;color:#555">
       <b>Assumptions:</b> balance point ${R.assumptions.balPointHeatF}°F · duct leakage ${R.assumptions.ductLeakUsed}% ·
-      age penalty −${R.assumptions.agePenaltyPct}% · COP source ${R.assumptions.copSource} ·
+      age penalty −${R.assumptions.agePenaltyPct}% · COP source ${R.assumptions.copSource} · capacity source ${R.assumptions.capSource} ·
       grid ${R.assumptions.gridEmissionsLbPerKwh} lb/kWh · climate ${R.assumptions.station}.
       Estimate accuracy ±${R.bandPct}%. Rebates not included. Figures are modeled estimates, not guarantees.
     </div>`;
 }
 window.addEventListener("beforeprint",buildReport);
-
-/* init */
-(function(){ const d=$("estDate"); if(!d.value)d.value=new Date().toISOString().slice(0,10);
-  toggleConditional(); recalc(); })();
+(function(){ const d=$("estDate"); if(!d.value)d.value=new Date().toISOString().slice(0,10); toggleConditional(); recalc(); })();
 </script>
 </body>
 </html>
