@@ -66,6 +66,34 @@ function copAt(tempF, curve) {
   return Math.max(cop, 1.0);
 }
 
+/* ---------- Capacity curve helpers ---------- */
+
+function modeledCapacityCurve(cap47Btu) {
+  return {
+    cap47: Math.round(cap47Btu),
+    cap17: Math.round(cap47Btu * 0.65),
+    cap5: Math.round(cap47Btu * 0.48),
+    modeled: true
+  };
+}
+
+function capacityAtTemp(tempF, curve) {
+  const { cap5, cap17, cap47 } = curve;
+  let cap;
+  if (tempF <= 5) {
+    cap = cap5;
+  } else if (tempF < 17) {
+    cap = cap5 + (cap17 - cap5) * (tempF - 5) / (17 - 5);
+  } else if (tempF < 47) {
+    cap = cap17 + (cap47 - cap17) * (tempF - 17) / (47 - 17);
+  } else {
+    const slope = (cap47 - cap17) / (47 - 17);
+    cap = cap47 + slope * (tempF - 47);
+    cap = Math.min(cap, cap47 * 1.1);
+  }
+  return Math.max(cap, 0);
+}
+
 /* ---------- Load model ----------
    Linear bin load ratio between balance point (zero load) and design temp
    (full design load). Standard ACCA-style bin approach. */
@@ -91,30 +119,33 @@ function calculate(input) {
     balPointHeatF = 65,
     balPointCoolF = 70,
 
-    elecRateCents = 11.2,    // cents/kWh
-    gasRateDollars = 1.28,   // $/therm
-    oilRateDollars = 4.50,   // $/gal
+    elecRateCents = 11.2,
+    gasRateDollars = 1.28,
+    oilRateDollars = 4.50,
     rateEscalationPct = 2.5,
     discountRatePct = 3.0,
 
-    existingFuel = "gas",    // gas | electric | oil | heatpump
-    afurePct = 80,           // furnace AFUE %
-    existingHspf = 8.0,      // for existing-heat-pump baseline
-    existingSeer = 13,       // existing AC SEER (0/blank = no cooling)
+    existingFuel = "gas",
+    afurePct = 80,
+    existingHspf = 8.0,
+    existingSeer = 13,
     systemAgeYrs = 12,
 
-    designHeatLoadMBH = 42.5,// Manual J heating design load (MBH = kBTU/hr)
-    designCoolLoadTons = 2.5,// Manual J cooling design load (tons)
+    designHeatLoadMBH = 42.5,
+    designCoolLoadTons = 2.5,
     hasManualJ = true,
 
-    ductSystem = "ducted_unknown", // ducted_unknown | ducted_tested | ductless | partial
-    ductLeakagePct = null,         // used when ducted_tested
+    ductSystem = "ducted_unknown",
+    ductLeakagePct = null,
 
     hpHspf2 = 9.5,
     hpSeer2 = 17.5,
     hpMinTempF = -13,
-    cop47 = null, cop17 = null, cop5 = null, // blank => modeled
-    backupType = "electric",  // electric | dualfuel_gas | none
+    hpCapTons = 3.0,
+    cap17Tons = null,
+    cap5Tons = null,
+    cop47 = null, cop17 = null, cop5 = null,
+    backupType = "electric",
 
     installedCost = 14500,
     equipmentLifeYrs = 18,
@@ -123,28 +154,24 @@ function calculate(input) {
   } = input;
 
   const station = BIN_TABLES[stationId] || BIN_TABLES.KSEA;
-  const elecRate = elecRateCents / 100;     // $/kWh
+  const elecRate = elecRateCents / 100;
   const afue = afurePct / 100;
 
-  /* Design loads to BTU/hr */
-  const designHeatBTU = designHeatLoadMBH * 1000;      // MBH -> BTU/hr
-  const designCoolBTU = designCoolLoadTons * 12000;    // tons -> BTU/hr
+  const designHeatBTU = designHeatLoadMBH * 1000;
+  const designCoolBTU = designCoolLoadTons * 12000;
 
-  /* Effective duct loss multiplier applied to delivered load (ducted only) */
   let ductFactor = 1.0;
   let ductLeakUsed = 0;
   if (ductSystem === "ducted_unknown") { ductLeakUsed = 12; ductFactor = 1.12; }
   else if (ductSystem === "ducted_tested") { ductLeakUsed = ductLeakagePct ?? 8; ductFactor = 1 + ductLeakUsed / 100; }
   else if (ductSystem === "partial") { ductLeakUsed = 6; ductFactor = 1.06; }
-  else { ductLeakUsed = 0; ductFactor = 1.0; } // ductless
+  else { ductLeakUsed = 0; ductFactor = 1.0; }
 
-  /* Age penalty: older equipment underperforms its rating */
-  const agePenalty = Math.min(0.10, Math.max(0, (systemAgeYrs - 8) * 0.01)); // up to -10%
+  const agePenalty = Math.min(0.10, Math.max(0, (systemAgeYrs - 8) * 0.01));
   const effAfue = afue * (1 - agePenalty);
   const effExistingHspf = existingHspf * (1 - agePenalty);
   const effSeer = existingSeer * (1 - agePenalty * 0.5);
 
-  /* COP curve for the proposed heat pump */
   let curve;
   if (cop47 && cop17 && cop5) {
     curve = { cop47, cop17, cop5, modeled: false };
@@ -152,22 +179,35 @@ function calculate(input) {
     curve = modeledCopCurve(hpHspf2);
   }
 
-  /* Accumulators */
+  const hpCap47Btu = hpCapTons * 12000;
+  let capCurve;
+  if (cap17Tons && cap5Tons) {
+    capCurve = {
+      cap47: hpCap47Btu,
+      cap17: cap17Tons * 12000,
+      cap5: cap5Tons * 12000,
+      modeled: false
+    };
+  } else {
+    capCurve = modeledCapacityCurve(hpCap47Btu);
+  }
+
   let baseHeatTherms = 0, baseHeatGal = 0, baseHeatKwh = 0, baseCoolKwh = 0;
-  let hpHeatKwh = 0, hpBackupKwh = 0, hpBackupTherms = 0, hpCoolKwh = 0;
+  let hpHeatKwh = 0, hpCoolKwh = 0;
+  let hpBackupLockoutKwh = 0, hpBackupLockoutTherms = 0;
+  let hpBackupCapKwh = 0, hpBackupCapTherms = 0;
   const binRows = [];
 
   for (const { t, h } of station.bins) {
     const hRatio = heatLoadRatio(t, balPointHeatF, designHeatF(designHeatTempF));
     const cRatio = coolLoadRatio(t, balPointCoolF, designCoolTempF);
 
-    const heatLoadBTU = designHeatBTU * hRatio * ductFactor; // BTU/hr delivered
+    const heatLoadBTU = designHeatBTU * hRatio * ductFactor;
     const coolLoadBTU = designCoolBTU * cRatio * ductFactor;
 
-    const heatBTU = heatLoadBTU * h; // BTU over the bin's hours
+    const heatBTU = heatLoadBTU * h;
     const coolBTU = coolLoadBTU * h;
 
-    /* ----- Baseline heating energy ----- */
     let bTherms = 0, bGal = 0, bKwh = 0;
     if (heatBTU > 0) {
       if (existingFuel === "gas") {
@@ -177,7 +217,7 @@ function calculate(input) {
         bGal = heatBTU / (effAfue * BTU_PER_GAL_OIL);
         baseHeatGal += bGal;
       } else if (existingFuel === "electric") {
-        bKwh = heatBTU / (1.0 * BTU_PER_KWH);
+        bKwh = heatBTU / BTU_PER_KWH;
         baseHeatKwh += bKwh;
       } else if (existingFuel === "heatpump") {
         const oldCop = effExistingHspf / 3.412;
@@ -186,36 +226,49 @@ function calculate(input) {
       }
     }
 
-    /* ----- Baseline cooling energy ----- */
     let bCoolKwh = 0;
     if (coolBTU > 0 && existingSeer > 0) {
       bCoolKwh = coolBTU / (effSeer * 1000);
       baseCoolKwh += bCoolKwh;
     }
 
-    /* ----- Heat pump heating energy ----- */
-    let hpKwh = 0, hpBkKwh = 0, hpBkTherms = 0, copUsed = 0;
+    let hpKwh = 0, copUsed = 0, capAtBin = 0;
+    let bkLockoutKwh = 0, bkLockoutTherms = 0;
+    let bkCapKwh = 0, bkCapTherms = 0;
     if (heatBTU > 0) {
       if (t < hpMinTempF) {
-        // below min operating temp: all load to backup
         if (backupType === "dualfuel_gas") {
-          hpBkTherms = heatBTU / (0.95 * BTU_PER_THERM);
-          hpBackupTherms += hpBkTherms;
-        } else {
-          hpBkKwh = heatBTU / (1.0 * BTU_PER_KWH);
-          hpBackupKwh += hpBkKwh;
+          bkLockoutTherms = heatBTU / (0.95 * BTU_PER_THERM);
+          hpBackupLockoutTherms += bkLockoutTherms;
+        } else if (backupType !== "none") {
+          bkLockoutKwh = heatBTU / BTU_PER_KWH;
+          hpBackupLockoutKwh += bkLockoutKwh;
         }
       } else {
         copUsed = copAt(t, curve);
-        hpKwh = heatBTU / (copUsed * BTU_PER_KWH);
+        capAtBin = capacityAtTemp(t, capCurve);
+        const deliveredBTUHr = Math.min(heatLoadBTU, capAtBin);
+        const shortfallBTUHr = Math.max(0, heatLoadBTU - capAtBin);
+        const deliveredBTU = deliveredBTUHr * h;
+        const shortfallBTU = shortfallBTUHr * h;
+
+        hpKwh = deliveredBTU / (copUsed * BTU_PER_KWH);
         hpHeatKwh += hpKwh;
+
+        if (shortfallBTU > 0) {
+          if (backupType === "dualfuel_gas") {
+            bkCapTherms = shortfallBTU / (0.95 * BTU_PER_THERM);
+            hpBackupCapTherms += bkCapTherms;
+          } else if (backupType !== "none") {
+            bkCapKwh = shortfallBTU / BTU_PER_KWH;
+            hpBackupCapKwh += bkCapKwh;
+          }
+        }
       }
     }
 
-    /* ----- Heat pump cooling energy ----- */
     let hpCKwh = 0;
     if (coolBTU > 0) {
-      // mild high-temp derate above 85F
       const derate = t > 85 ? 0.92 : 1.0;
       hpCKwh = coolBTU / (hpSeer2 * derate * 1000);
       hpCoolKwh += hpCKwh;
@@ -225,14 +278,21 @@ function calculate(input) {
       t, h,
       hRatio: round3(hRatio), cRatio: round3(cRatio),
       heatLoadBTU: Math.round(heatLoadBTU),
+      capAtTemp: Math.round(capAtBin),
       copUsed: round2(copUsed),
       baseHeat: round1(bTherms || bGal || bKwh),
-      hpHeatKwh: round1(hpKwh + hpBkKwh),
+      hpHeatKwh: round1(hpKwh),
+      hpBackupLockoutKwh: round1(bkLockoutKwh),
+      hpBackupCapKwh: round1(bkCapKwh),
+      hpBackupLockoutTherms: round1(bkLockoutTherms),
+      hpBackupCapTherms: round1(bkCapTherms),
       hpCoolKwh: round1(hpCKwh)
     });
   }
 
-  /* ----- Baseline annual cost ----- */
+  const hpBackupKwh = hpBackupLockoutKwh + hpBackupCapKwh;
+  const hpBackupTherms = hpBackupLockoutTherms + hpBackupCapTherms;
+
   const baseHeatCost =
       baseHeatTherms * gasRateDollars
     + baseHeatGal * oilRateDollars
@@ -240,15 +300,12 @@ function calculate(input) {
   const baseCoolCost = baseCoolKwh * elecRate;
   const baseCost = baseHeatCost + baseCoolCost;
 
-  /* ----- Heat pump annual cost ----- */
   const hpElecKwh = hpHeatKwh + hpBackupKwh + hpCoolKwh;
   const hpCost = hpElecKwh * elecRate + hpBackupTherms * gasRateDollars;
 
-  /* ----- Savings ----- */
   const annualSavings = baseCost - hpCost;
   const pctSavings = baseCost > 0 ? (annualSavings / baseCost) * 100 : 0;
 
-  /* ----- Energy reduction (site kWh-equivalent, always meaningful) ----- */
   const baseSiteKwhEq =
       baseHeatKwh + baseCoolKwh
     + baseHeatTherms * KWH_PER_THERM
@@ -256,7 +313,6 @@ function calculate(input) {
   const hpSiteKwhEq = hpElecKwh + hpBackupTherms * KWH_PER_THERM;
   const energyReductionKwh = baseSiteKwhEq - hpSiteKwhEq;
 
-  /* ----- CO2 ----- */
   const baseCo2 =
       baseHeatTherms * CO2_LB_PER_THERM
     + baseHeatGal * CO2_LB_PER_GAL
@@ -264,13 +320,11 @@ function calculate(input) {
   const hpCo2 = hpElecKwh * gridEmissionsLbPerKwh + hpBackupTherms * CO2_LB_PER_THERM;
   const co2ReductionLb = baseCo2 - hpCo2;
 
-  /* ----- Accuracy tier & confidence band ----- */
   let tier, bandPct;
   if (hasManualJ && !curve.modeled) { tier = "Detailed";  bandPct = 12; }
   else if (hasManualJ && curve.modeled) { tier = "Standard"; bandPct = 18; }
   else { tier = "Indicative"; bandPct = 25; }
 
-  /* ----- Financials ----- */
   const simplePayback = annualSavings > 0 ? installedCost / annualSavings : Infinity;
   const esc = rateEscalationPct / 100;
   const disc = discountRatePct / 100;
@@ -299,27 +353,28 @@ function calculate(input) {
       balPointHeatF, ductLeakUsed,
       agePenaltyPct: round1(agePenalty * 100),
       copSource: curve.modeled ? "Modeled from HSPF2" : "Mfr. data sheet",
+      capSource: capCurve.modeled ? "Standard degradation" : "Mfr. data sheet",
       curve,
+      capCurve,
       gridEmissionsLbPerKwh,
       station: station.label
     },
     binRows,
     raw: {
       baseHeatTherms, baseHeatGal, baseHeatKwh, baseCoolKwh,
-      hpHeatKwh, hpBackupKwh, hpBackupTherms, hpCoolKwh, hpElecKwh
+      hpHeatKwh, hpBackupKwh, hpBackupTherms, hpCoolKwh, hpElecKwh,
+      hpBackupLockoutKwh, hpBackupLockoutTherms,
+      hpBackupCapKwh, hpBackupCapTherms,
+      capCurve
     }
   };
 }
 
-/* design heat temp passthrough (kept as fn for clarity in load ratio call) */
 function designHeatF(v){ return v; }
-
-/* rounding helpers */
 function round1(v){ return Math.round(v * 10) / 10; }
 function round2(v){ return Math.round(v * 100) / 100; }
 function round3(v){ return Math.round(v * 1000) / 1000; }
 
-/* export for node testing; ignored in browser */
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { calculate, modeledCopCurve, copAt, BIN_TABLES };
+  module.exports = { calculate, modeledCopCurve, copAt, modeledCapacityCurve, capacityAtTemp, BIN_TABLES };
 }
