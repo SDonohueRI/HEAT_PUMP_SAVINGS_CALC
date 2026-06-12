@@ -1,4 +1,4 @@
-const { calculate, modeledCopCurve, copAt, BIN_TABLES } = require("./engine.js");
+const { calculate, modeledCopCurve, copAt, modeledCapacityCurve, capacityAtTemp, BIN_TABLES } = require("./engine.js");
 
 function hr(){ console.log("─".repeat(70)); }
 function fmt(v){ return typeof v === "number" ? v.toLocaleString(undefined,{maximumFractionDigits:1}) : v; }
@@ -22,12 +22,22 @@ console.log("Monotonic increasing with temp:",
     .every((v,i,a)=> i===0 || v>=a[i-1]));
 hr();
 
+/* Capacity curve checks */
+const capCurve = modeledCapacityCurve(36000);
+console.log("Modeled capacity curve from 3 tons:", capCurve);
+console.log("Cap at 47F:", capacityAtTemp(47, capCurve), "(should be 36000)");
+console.log("Cap at 17F:", capacityAtTemp(17, capCurve), "(should be 23400)");
+console.log("Cap at 5F :", capacityAtTemp(5, capCurve), "(should be 17280)");
+console.log("Cap at 30F:", capacityAtTemp(30, capCurve));
+console.log("Cap at 60F:", capacityAtTemp(60, capCurve), "(should be ≤ 39600 = 110%)");
+hr();
+
 /* Scenario A: gas furnace + AC -> ducted HP, with mfr COP data */
 const A = calculate({
   existingFuel: "gas", afurePct: 80, existingSeer: 13, systemAgeYrs: 12,
   designHeatLoadMBH: 42.5, designCoolLoadTons: 2.5, hasManualJ: true,
   ductSystem: "ducted_unknown",
-  hpHspf2: 9.5, hpSeer2: 17.5, hpMinTempF: -13,
+  hpHspf2: 9.5, hpSeer2: 17.5, hpMinTempF: -13, hpCapTons: 3.0,
   cop47: 3.8, cop17: 2.1, cop5: 1.4, backupType: "electric",
   installedCost: 14500, equipmentLifeYrs: 18,
   elecRateCents: 11.2, gasRateDollars: 1.28
@@ -44,6 +54,7 @@ console.log("  Baseline cost: $"+fmt(A.baseCost)+"  |  HP cost: $"+fmt(A.hpCost)
 console.log("  Simple payback:", A.simplePayback.toFixed(1), "yrs");
 console.log("  Lifetime savings: $"+fmt(A.lifetimeSavings)+"  |  NPV: $"+fmt(A.npv));
 console.log("  Baseline therms:", fmt(A.raw.baseHeatTherms), " HP elec kWh:", fmt(A.raw.hpElecKwh));
+console.log("  Backup capacity kWh:", fmt(A.raw.hpBackupCapKwh));
 hr();
 
 /* Scenario B: electric resistance -> ductless HP, modeled COP */
@@ -51,7 +62,7 @@ const B = calculate({
   existingFuel: "electric", existingSeer: 0, systemAgeYrs: 15,
   designHeatLoadMBH: 38, designCoolLoadTons: 0, hasManualJ: true,
   ductSystem: "ductless",
-  hpHspf2: 10.0, hpSeer2: 19, hpMinTempF: -5,
+  hpHspf2: 10.0, hpSeer2: 19, hpMinTempF: -5, hpCapTons: 3.0,
   cop47: null, cop17: null, cop5: null, backupType: "electric",
   installedCost: 9500, equipmentLifeYrs: 18,
   elecRateCents: 11.2
@@ -71,7 +82,7 @@ const C = calculate({
   existingFuel: "oil", afurePct: 78, existingSeer: 0, systemAgeYrs: 20,
   designHeatLoadMBH: 55, designCoolLoadTons: 0, hasManualJ: true,
   ductSystem: "ducted_tested", ductLeakagePct: 8,
-  hpHspf2: 9.0, hpSeer2: 16, hpMinTempF: 5,
+  hpHspf2: 9.0, hpSeer2: 16, hpMinTempF: 5, hpCapTons: 3.0,
   cop47: 3.5, cop17: 1.9, cop5: 1.2, backupType: "dualfuel_gas",
   installedCost: 16000, equipmentLifeYrs: 18,
   elecRateCents: 11.2, oilRateDollars: 4.50, gasRateDollars: 1.28
@@ -81,7 +92,8 @@ console.log("  Tier:", C.tier, "±"+C.bandPct+"%");
 console.log("  % energy cost reduction:", C.pctSavings.toFixed(1)+"%");
 console.log("  Annual $ savings:", "$"+fmt(C.annualSavings));
 console.log("  Baseline oil gallons:", fmt(C.raw.baseHeatGal));
-console.log("  HP backup therms (below 5F):", fmt(C.raw.hpBackupTherms));
+console.log("  HP backup therms (below 5F):", fmt(C.raw.hpBackupLockoutTherms));
+console.log("  HP backup therms (capacity):", fmt(C.raw.hpBackupCapTherms));
 console.log("  Simple payback:", C.simplePayback.toFixed(1), "yrs");
 hr();
 
@@ -90,7 +102,7 @@ const D = calculate({
   existingFuel: "heatpump", existingHspf: 7.5, existingSeer: 14, systemAgeYrs: 14,
   designHeatLoadMBH: 40, designCoolLoadTons: 3, hasManualJ: true,
   ductSystem: "ducted_unknown",
-  hpHspf2: 10.5, hpSeer2: 20, hpMinTempF: -13,
+  hpHspf2: 10.5, hpSeer2: 20, hpMinTempF: -13, hpCapTons: 3.0,
   cop47: 4.1, cop17: 2.4, cop5: 1.6, backupType: "electric",
   installedCost: 13000, equipmentLifeYrs: 18,
   elecRateCents: 11.2
@@ -107,11 +119,48 @@ hr();
 const E = calculate({
   existingFuel: "gas", afurePct: 80, existingSeer: 13,
   designHeatLoadMBH: 45, designCoolLoadTons: 2.5, hasManualJ: false,
-  hpHspf2: 9.5, hpSeer2: 17.5, cop47: null,
+  hpHspf2: 9.5, hpSeer2: 17.5, hpCapTons: 3.0, cop47: null,
   installedCost: 14500
 });
 console.log("SCENARIO E — No Manual J (indicative tier)");
 console.log("  Tier:", E.tier, "±"+E.bandPct+"%  (expect Indicative ±25%)");
+hr();
+
+/* Scenario F: undersized HP should trigger capacity backup */
+const F = calculate({
+  existingFuel: "gas", afurePct: 80, existingSeer: 13, systemAgeYrs: 12,
+  designHeatLoadMBH: 55, designCoolLoadTons: 2.5, hasManualJ: true,
+  ductSystem: "ducted_unknown",
+  hpHspf2: 9.5, hpSeer2: 17.5, hpMinTempF: -13, hpCapTons: 2.0,
+  cop47: 3.8, cop17: 2.1, cop5: 1.4, backupType: "electric",
+  installedCost: 14500, equipmentLifeYrs: 18,
+  elecRateCents: 11.2, gasRateDollars: 1.28
+});
+console.log("SCENARIO F — Undersized HP (2 tons for 55 MBH load)");
+console.log("  Tier:", F.tier, "±"+F.bandPct+"%");
+console.log("  % energy cost reduction:", F.pctSavings.toFixed(1)+"%");
+console.log("  Annual $ savings:", "$"+fmt(F.annualSavings));
+console.log("  HP compressor kWh:", fmt(F.raw.hpHeatKwh));
+console.log("  Backup lockout kWh:", fmt(F.raw.hpBackupLockoutKwh));
+console.log("  Backup capacity kWh:", fmt(F.raw.hpBackupCapKwh));
+console.log("  Total backup kWh:", fmt(F.raw.hpBackupKwh));
+console.log("  Simple payback:", F.simplePayback.toFixed(1), "yrs");
+console.log("  (Savings should be LOWER than Scenario A due to more backup heat)");
+hr();
+
+/* Scenario G: properly sized HP should avoid capacity backup */
+const G = calculate({
+  existingFuel: "gas", afurePct: 80, existingSeer: 13, systemAgeYrs: 12,
+  designHeatLoadMBH: 42.5, designCoolLoadTons: 2.5, hasManualJ: true,
+  ductSystem: "ducted_unknown",
+  hpHspf2: 9.5, hpSeer2: 17.5, hpMinTempF: -13, hpCapTons: 3.0,
+  cop47: 3.8, cop17: 2.1, cop5: 1.4, backupType: "electric",
+  installedCost: 14500, equipmentLifeYrs: 18,
+  elecRateCents: 11.2, gasRateDollars: 1.28
+});
+console.log("SCENARIO G — Properly sized HP (regression check vs Scenario A)");
+console.log("  Backup capacity kWh:", fmt(G.raw.hpBackupCapKwh), "(should be 0 or near-zero if capacity >= load)");
+console.log("  Annual savings match A?", Math.abs(G.annualSavings - A.annualSavings) < 1 ? "YES" : "NO — check capacity curve");
 hr();
 
 console.log("All scenarios ran without error.");
